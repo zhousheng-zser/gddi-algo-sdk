@@ -1,0 +1,25 @@
+{
+    "cmake.configureArgs": [
+        "-G",
+        "Ninja",
+        "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+        "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
+    ],
+    "cmake.buildDirectory": "${workspaceRoot}/build",
+    "doxdocgen.file.versionTag": "@version 1.0.0",
+    "doxdocgen.file.copyrightTag": [
+        "@copyright Copyright (c) {year} by GDDI"
+    ],
+    "doxdocgen.generic.authorName": "zhdotcai",
+    "doxdocgen.generic.authorEmail": "caizhehong@gddi.com.cn",
+    "doxdocgen.generic.authorTag": "@author {author} ({email})",
+    "clangd.arguments": [
+        "--background-index",
+        "--compile-commands-dir=${workspaceFolder}/build",
+        "-j=12",
+        "--clang-tidy",
+        "--all-scopes-completion",
+        "--completion-style=detailed",
+        "--function-arg-placeholders"
+    ]
+}

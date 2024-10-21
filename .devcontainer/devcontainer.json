@@ -1,0 +1,24 @@
+{
+    "name": "GddiAlgoSDK",
+    "build": {
+        "dockerfile": "Dockerfile"
+    },
+    "workspaceFolder": "/workspaces/gddi-algo-sdk",
+    "runArgs": [
+        "--network=host"
+	],
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-vscode.cpptools",
+				"llvm-vs-code-extensions.vscode-clangd",
+				"twxs.cmake",
+				"ms-vscode.cmake-tools",
+				"ms-azuretools.vscode-docker",
+				"cschlosser.doxdocgen",
+				"donjayamanne.githistory",
+				"redjue.git-commit-plugin"
+			]
+		}
+	}
+}

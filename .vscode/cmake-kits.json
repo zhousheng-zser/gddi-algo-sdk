@@ -1,0 +1,6 @@
+[
+    {
+        "name": "aarch64-linux-bm1684x",
+        "toolchainFile": "${workspaceRoot}/cmake/toolchains/aarch64_linux_bm1684x.toolchain"
+    }
+]
