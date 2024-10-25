@@ -138,9 +138,7 @@ inline std::vector<AlgoObject> find_cover_objects(const std::vector<AlgoObject> 
             // 计算两个目标的IOU
             auto cover_rate = area_cover_rate(target_1.rect, target_2.rect);
             if (cover_rate > 0 && exclude_labels.count(target_2.label) > 0) {
-                current_objects.clear();
-                target_labels.clear();
-                continue;
+                break;
             } else if (cover_rate >= cover_threshold) {
                 current_objects[target_2.target_id] = target_2;
                 target_labels.emplace(target_2.label);

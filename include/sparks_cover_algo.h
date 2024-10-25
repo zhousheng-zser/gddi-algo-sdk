@@ -58,7 +58,7 @@ public:
 
 protected:
     std::vector<AlgoObject> filter_infer_result(const gddeploy::InferResult &infer_result,
-                                                const std::set<std::string> &labels, const float threshold);
+                                                const std::set<std::string> &labels);
 
 private:
     SparksCoverAlgoConfig config_;

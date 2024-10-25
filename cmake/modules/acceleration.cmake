@@ -1,6 +1,6 @@
 set(LinkLibraries "${LinkLibraries};gddeploy_app;gddeploy_api;gddeploy_core;gddeploy_register;gddeploy_common;bmrt")
-set(SDK_DOWNLOAD_URL "http://cacher.devops.io/api/cacher/files/40fb56d71052ddb5850bda7094176fcf8fc49e62183b2203eda6245fc752a485")
-set(SDK_URL_HASH "40fb56d71052ddb5850bda7094176fcf8fc49e62183b2203eda6245fc752a485")
+set(SDK_DOWNLOAD_URL "http://cacher.devops.io/api/cacher/files/18fbbd882166565dff5b9358cad6f24253b09d9a84526f2a0dafef70970a30f5")
+set(SDK_URL_HASH "18fbbd882166565dff5b9358cad6f24253b09d9a84526f2a0dafef70970a30f5")
 
 include(FetchContent)
 FetchContent_Declare(

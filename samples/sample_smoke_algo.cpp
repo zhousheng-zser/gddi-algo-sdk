@@ -7,8 +7,8 @@ int main() {
     gddi::SmokeAlgoConfig config;
     auto smoke_algo = std::make_unique<gddi::SmokeAlgo>(config);
 
-    std::string video_path = "../videos/smoke.mp4";
-    std::vector<gddi::ModelConfig> models = {{"person", "../models/person.gdd", "../models/license_person.gdd", 0.8},
+    std::string video_path = "../videos/smoke_play_phone.mp4";
+    std::vector<gddi::ModelConfig> models = {{"person", "../models/person.gdd", "../models/license_person.gdd", 0.3},
                                              {"smoke", "../models/smoke.gdd", "../models/license_smoke.gdd", 0.3}};
 
     if (!smoke_algo->load_models(models)) {
@@ -29,6 +29,8 @@ int main() {
         image.read(frame);
         if (frame.empty()) { break; }
 
+        auto start = std::chrono::steady_clock::now();
+
         std::vector<gddi::AlgoObject> objects;
         smoke_algo->sync_infer(frame_index, frame, objects);
 
@@ -42,6 +44,10 @@ int main() {
             }
             cv::imwrite("smoke_" + std::to_string(frame_index) + ".jpg", frame);
         }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(
+            40
+            - std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count()));
 
         frame_index++;
     }

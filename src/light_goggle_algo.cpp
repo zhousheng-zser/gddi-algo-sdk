@@ -6,6 +6,7 @@
 #include <api/global_config.h>
 #include <bmcv_api_ext.h>
 #include <common/type_convert.h>
+#include <core/alg_param.h>
 #include <mutex>
 
 namespace gddi {
@@ -30,10 +31,16 @@ LightGoggleAlgo::LightGoggleAlgo(const LightGoggleAlgoConfig &config) : config_(
 }
 
 LightGoggleAlgo::~LightGoggleAlgo() {
+    std::lock_guard<std::mutex> lock(private_->model_mutex);
     for (auto &impl : private_->model_impls) { impl->WaitTaskDone(); }
 }
 
 bool LightGoggleAlgo::load_models(const std::vector<ModelConfig> &models) {
+    if (models.size() != 3) {
+        spdlog::error("LightGoggleAlgo only support three models");
+        return false;
+    }
+
     std::lock_guard<std::mutex> lock(private_->model_mutex);
     private_->model_impls.clear();
 
@@ -56,6 +63,8 @@ void LightGoggleAlgo::async_infer(const int64_t image_id, const cv::Mat &image, 
 
     auto package = gddeploy::Package::Create(1);
     package->data[0]->Set(surface);
+    package->data[0]->SetAlgParam(
+        gddeploy::AlgDetectParam{private_->model_configs[0].threshold, private_->model_configs[0].nms_threshold});
 
     private_->model_impls[0]->InferAsync(
         package,
@@ -63,9 +72,8 @@ void LightGoggleAlgo::async_infer(const int64_t image_id, const cv::Mat &image, 
                                                          gddeploy::any user_data) {
             std::vector<AlgoObject> infer_objects;
             if (!data->data.empty() && data->data[0]->HasMetaValue()) {
-                infer_objects =
-                    filter_infer_result(data->data[0]->GetMetaData<gddeploy::InferResult>(),
-                                        private_->model_configs[0].labels, private_->model_configs[0].threshold);
+                infer_objects = filter_infer_result(data->data[0]->GetMetaData<gddeploy::InferResult>(),
+                                                    private_->model_configs[0].labels);
             }
 
             // 如果一阶段没有检测目标，直接返回
@@ -74,13 +82,14 @@ void LightGoggleAlgo::async_infer(const int64_t image_id, const cv::Mat &image, 
             } else {
                 auto in_package = gddeploy::Package::Create(1);
                 in_package->data[0]->Set(surface);
+                in_package->data[0]->SetAlgParam(gddeploy::AlgDetectParam{private_->model_configs[1].threshold,
+                                                                          private_->model_configs[1].nms_threshold});
 
                 auto out_package = gddeploy::Package::Create(1);
                 private_->model_impls[1]->InferSync(in_package, out_package);
                 if (!out_package->data.empty() && out_package->data[0]->HasMetaValue()) {
-                    infer_objects =
-                        filter_infer_result(out_package->data[0]->GetMetaData<gddeploy::InferResult>(),
-                                            private_->model_configs[1].labels, private_->model_configs[1].threshold);
+                    infer_objects = filter_infer_result(out_package->data[0]->GetMetaData<gddeploy::InferResult>(),
+                                                        private_->model_configs[1].labels);
                 }
 
                 // 生成目标跟踪ID
@@ -128,13 +137,16 @@ void LightGoggleAlgo::async_infer(const int64_t image_id, const cv::Mat &image, 
                         in_package = gddeploy::Package::Create(1);
                         out_package = gddeploy::Package::Create(1);
                         in_package->data[0]->Set(crop_surface);
+                        in_package->data[0]->SetAlgParam(gddeploy::AlgDetectParam{
+                            private_->model_configs[2].threshold, private_->model_configs[2].nms_threshold});
+
                         private_->model_impls[2]->InferSync(in_package, out_package);
 
                         std::vector<AlgoObject> mask_objects;
                         if (!out_package->data.empty() && out_package->data[0]->HasMetaValue()) {
-                            mask_objects = filter_infer_result(
-                                out_package->data[0]->GetMetaData<gddeploy::InferResult>(),
-                                private_->model_configs[2].labels, private_->model_configs[2].threshold);
+                            mask_objects =
+                                filter_infer_result(out_package->data[0]->GetMetaData<gddeploy::InferResult>(),
+                                                    private_->model_configs[2].labels);
                         }
 
                         if (mask_objects.empty()) { match_objects.emplace_back(tracked_object); }
@@ -155,6 +167,8 @@ bool LightGoggleAlgo::sync_infer(const int64_t image_id, const cv::Mat &image,
 
     auto in_package = gddeploy::Package::Create(1);
     in_package->data[0]->Set(surface);
+    in_package->data[0]->SetAlgParam(
+        gddeploy::AlgDetectParam{private_->model_configs[0].threshold, private_->model_configs[0].nms_threshold});
 
     auto out_package = gddeploy::Package::Create(1);
     if (private_->model_impls[0]->InferSync(in_package, out_package) != 0) { return false; }
@@ -162,20 +176,21 @@ bool LightGoggleAlgo::sync_infer(const int64_t image_id, const cv::Mat &image,
     std::vector<AlgoObject> infer_objects;
     if (!out_package->data.empty() && out_package->data[0]->HasMetaValue()) {
         infer_objects = filter_infer_result(out_package->data[0]->GetMetaData<gddeploy::InferResult>(),
-                                            private_->model_configs[0].labels, private_->model_configs[0].threshold);
+                                            private_->model_configs[0].labels);
     }
 
     // 二阶段检测
     if (!infer_objects.empty()) {
-        auto in_package = gddeploy::Package::Create(1);
+        in_package = gddeploy::Package::Create(1);
         in_package->data[0]->Set(surface);
+        in_package->data[0]->SetAlgParam(
+            gddeploy::AlgDetectParam{private_->model_configs[1].threshold, private_->model_configs[1].nms_threshold});
 
-        auto out_package = gddeploy::Package::Create(1);
+        out_package = gddeploy::Package::Create(1);
         private_->model_impls[1]->InferSync(in_package, out_package);
         if (!out_package->data.empty() && out_package->data[0]->HasMetaValue()) {
-            infer_objects =
-                filter_infer_result(out_package->data[0]->GetMetaData<gddeploy::InferResult>(),
-                                    private_->model_configs[1].labels, private_->model_configs[1].threshold);
+            infer_objects = filter_infer_result(out_package->data[0]->GetMetaData<gddeploy::InferResult>(),
+                                                private_->model_configs[1].labels);
         }
 
         // 生成目标跟踪ID
@@ -220,13 +235,15 @@ bool LightGoggleAlgo::sync_infer(const int64_t image_id, const cv::Mat &image,
                 in_package = gddeploy::Package::Create(1);
                 out_package = gddeploy::Package::Create(1);
                 in_package->data[0]->Set(crop_surface);
+                in_package->data[0]->SetAlgParam(gddeploy::AlgDetectParam{private_->model_configs[2].threshold,
+                                                                          private_->model_configs[2].nms_threshold});
+
                 private_->model_impls[2]->InferSync(in_package, out_package);
 
                 std::vector<AlgoObject> mask_objects;
                 if (!out_package->data.empty() && out_package->data[0]->HasMetaValue()) {
-                    mask_objects =
-                        filter_infer_result(out_package->data[0]->GetMetaData<gddeploy::InferResult>(),
-                                            private_->model_configs[2].labels, private_->model_configs[2].threshold);
+                    mask_objects = filter_infer_result(out_package->data[0]->GetMetaData<gddeploy::InferResult>(),
+                                                       private_->model_configs[2].labels);
                 }
 
                 if (mask_objects.empty()) { match_objects.emplace_back(tracked_object); }
@@ -240,8 +257,7 @@ bool LightGoggleAlgo::sync_infer(const int64_t image_id, const cv::Mat &image,
 }
 
 std::vector<AlgoObject> LightGoggleAlgo::filter_infer_result(const gddeploy::InferResult &infer_result,
-                                                             const std::set<std::string> &labels,
-                                                             const float threshold) {
+                                                             const std::set<std::string> &labels) {
     std::vector<AlgoObject> objects;
 
     for (auto result_type : infer_result.result_type) {
@@ -249,7 +265,7 @@ std::vector<AlgoObject> LightGoggleAlgo::filter_infer_result(const gddeploy::Inf
             for (const auto &item : infer_result.detect_result.detect_imgs) {
                 int index = 1;
                 for (auto &obj : item.detect_objs) {
-                    if (labels.count(obj.label) == 0 || obj.score < threshold) { continue; }
+                    if (labels.count(obj.label) == 0) { continue; }
 
                     objects.emplace_back(
                         AlgoObject{index++, obj.class_id, obj.label, obj.score,

@@ -63,7 +63,7 @@ public:
     bool sync_infer(const int64_t image_id, const cv::Mat &image, std::vector<AlgoObject> &objects);
 
 protected:
-    std::vector<AlgoObject> parse_infer_result(const gddeploy::InferResult &infer_result, const float threshold);
+    std::vector<AlgoObject> parse_infer_result(const gddeploy::InferResult &infer_result);
 
 private:
     PlayPhoneAlgoConfig config_;
