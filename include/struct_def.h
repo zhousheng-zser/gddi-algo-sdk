@@ -13,6 +13,10 @@
 
 #include <opencv2/core/mat.hpp>
 #include <set>
+#include <iostream>
+#include <algorithm>
+#include <functional>
+
 
 namespace gddi {
 
