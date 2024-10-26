@@ -1,6 +1,4 @@
-#include "light_mask_algo.h"
-#include "bytetrack/BYTETracker.h"
-#include "sequence_statistic.h"
+#include "hoisting_operation_algo.h"
 #include "spdlog/spdlog.h"
 #include "utils.h"
 #include <api/global_config.h>
@@ -11,33 +9,26 @@
 
 namespace gddi {
 
-class LightMaskAlgo::LightMaskAlgoPrivate {
+class HoistingOperationAlgo::HoistingOperationAlgoPrivate {
 public:
-    std::unique_ptr<BYTETracker> tracker;
-    std::unique_ptr<SequenceStatistic> sequence_statistic;
-
     std::mutex model_mutex;
     std::vector<ModelConfig> model_configs;
     std::vector<std::unique_ptr<gddeploy::InferAPI>> model_impls;
 };
 
-LightMaskAlgo::LightMaskAlgo(const LightMaskAlgoConfig &config) : config_(config) {
+HoistingOperationAlgo::HoistingOperationAlgo(const HoistingOperationAlgoConfig &config) : config_(config) {
     gddeploy::gddeploy_init("");
-    private_ = std::make_unique<LightMaskAlgoPrivate>();
-
-    private_->tracker = std::make_unique<BYTETracker>(0.3, 0.6, 0.8, 30);
-    private_->sequence_statistic =
-        std::make_unique<SequenceStatistic>(config_.statistics_interval, config_.statistics_threshold);
+    private_ = std::make_unique<HoistingOperationAlgoPrivate>();
 }
 
-LightMaskAlgo::~LightMaskAlgo() {
+HoistingOperationAlgo::~HoistingOperationAlgo() {
     std::lock_guard<std::mutex> lock(private_->model_mutex);
     for (auto &impl : private_->model_impls) { impl->WaitTaskDone(); }
 }
 
-bool LightMaskAlgo::load_models(const std::vector<ModelConfig> &models) {
+bool HoistingOperationAlgo::load_models(const std::vector<ModelConfig> &models) {
     if (models.size() != 3) {
-        spdlog::error("LightMaskAlgo only support three models");
+        spdlog::error("HoistingOperationAlgo requires exactly three models");
         return false;
     }
 
@@ -57,7 +48,7 @@ bool LightMaskAlgo::load_models(const std::vector<ModelConfig> &models) {
     return true;
 }
 
-void LightMaskAlgo::async_infer(const int64_t image_id, const cv::Mat &image, InferCallback infer_callback) {
+void HoistingOperationAlgo::async_infer(const int64_t image_id, const cv::Mat &image, InferCallback infer_callback) {
     gddeploy::BufSurfWrapperPtr surface;
     convertMat2BufSurface(const_cast<cv::Mat &>(image), surface);
 
@@ -92,43 +83,22 @@ void LightMaskAlgo::async_infer(const int64_t image_id, const cv::Mat &image, In
                                                         private_->model_configs[1].labels);
                 }
 
-                // 生成目标跟踪ID
-                std::vector<Object> objects;
-                for (const auto &item : infer_objects) {
-                    objects.push_back(Object{
-                        .class_id = item.class_id,
-                        .prob = item.score,
-                        .rect = {(float)item.rect.x, (float)item.rect.y, (float)item.rect.width,
-                                 (float)item.rect.height},
-                        .label_name = item.label,
-                    });
-                }
-
-                std::vector<AlgoObject> tracked_objects;
-                for (auto &item : private_->tracker->update(objects)) {
-                    tracked_objects.emplace_back(
-                        AlgoObject{item.target_id, item.class_id, item.label_name, item.score,
-                                   cv::Rect{(int)item.tlwh[0], (int)item.tlwh[1], (int)item.tlwh[2], (int)item.tlwh[3]},
-                                   item.track_id});
-                }
-
-                std::vector<AlgoObject> statistic_objects;
-                if (!tracked_objects.empty()) {
+                std::vector<AlgoObject> match_objects;
+                if (!infer_objects.empty()) {
                     // 裁剪目标 & 排序
-                    std::sort(tracked_objects.begin(), tracked_objects.end(),
+                    std::sort(infer_objects.begin(), infer_objects.end(),
                               [](const AlgoObject &item1, const AlgoObject &item2) {
                                   return item1.score > item2.score
                                       && item1.rect.width * item1.rect.height > item2.rect.width * item2.rect.height;
                               });
 
                     // 裁剪目标数
-                    if (tracked_objects.size() > private_->model_configs[2].max_crop_number) {
-                        tracked_objects.resize(private_->model_configs[2].max_crop_number);
+                    if (infer_objects.size() > private_->model_configs[2].max_crop_number) {
+                        infer_objects.resize(private_->model_configs[2].max_crop_number);
                     }
 
-                    std::vector<AlgoObject> match_objects;
-                    for (const auto &tracked_object : tracked_objects) {
-                        auto crop_rect = scale_crop_rect(image.cols, image.rows, tracked_object.rect,
+                    for (const auto &item : infer_objects) {
+                        auto crop_rect = scale_crop_rect(image.cols, image.rows, item.rect,
                                                          private_->model_configs[2].crop_scale_factor);
                         auto crop_image = image(crop_rect).clone();
 
@@ -142,26 +112,26 @@ void LightMaskAlgo::async_infer(const int64_t image_id, const cv::Mat &image, In
 
                         private_->model_impls[2]->InferSync(in_package, out_package);
 
-                        std::vector<AlgoObject> mask_objects;
                         if (!out_package->data.empty() && out_package->data[0]->HasMetaValue()) {
-                            mask_objects =
+                            auto objects =
                                 filter_infer_result(out_package->data[0]->GetMetaData<gddeploy::InferResult>(),
                                                     private_->model_configs[2].labels);
+                            for (auto &obj : objects) {
+                                obj.rect.x += crop_rect.x;
+                                obj.rect.y += crop_rect.y;
+                                match_objects.emplace_back(obj);
+                            }
                         }
-
-                        if (mask_objects.empty()) { match_objects.emplace_back(tracked_object); }
                     }
-
-                    statistic_objects = private_->sequence_statistic->update(match_objects);
                 }
 
-                if (infer_callback) { infer_callback(image_id, image, statistic_objects); }
+                if (infer_callback) { infer_callback(image_id, image, match_objects); }
             }
         });
 }
 
-bool LightMaskAlgo::sync_infer(const int64_t image_id, const cv::Mat &image,
-                               std::vector<AlgoObject> &statistic_objects) {
+bool HoistingOperationAlgo::sync_infer(const int64_t image_id, const cv::Mat &image,
+                                       std::vector<AlgoObject> &match_objects) {
     gddeploy::BufSurfWrapperPtr surface;
     convertMat2BufSurface(const_cast<cv::Mat &>(image), surface);
 
@@ -182,52 +152,32 @@ bool LightMaskAlgo::sync_infer(const int64_t image_id, const cv::Mat &image,
     // 二阶段检测
     if (!infer_objects.empty()) {
         in_package = gddeploy::Package::Create(1);
-        out_package = gddeploy::Package::Create(1);
         in_package->data[0]->Set(surface);
         in_package->data[0]->SetAlgParam(
             gddeploy::AlgDetectParam{private_->model_configs[1].threshold, private_->model_configs[1].nms_threshold});
 
+        out_package = gddeploy::Package::Create(1);
         private_->model_impls[1]->InferSync(in_package, out_package);
         if (!out_package->data.empty() && out_package->data[0]->HasMetaValue()) {
             infer_objects = filter_infer_result(out_package->data[0]->GetMetaData<gddeploy::InferResult>(),
                                                 private_->model_configs[1].labels);
         }
 
-        // 生成目标跟踪ID
-        std::vector<Object> objects;
-        for (const auto &item : infer_objects) {
-            objects.push_back(Object{
-                .class_id = item.class_id,
-                .prob = item.score,
-                .rect = {(float)item.rect.x, (float)item.rect.y, (float)item.rect.width, (float)item.rect.height},
-                .label_name = item.label,
-            });
-        }
-
-        std::vector<AlgoObject> tracked_objects;
-        for (auto &item : private_->tracker->update(objects)) {
-            tracked_objects.emplace_back(AlgoObject{
-                item.target_id, item.class_id, item.label_name, item.score,
-                cv::Rect{(int)item.tlwh[0], (int)item.tlwh[1], (int)item.tlwh[2], (int)item.tlwh[3]}, item.track_id});
-        }
-
-        if (!tracked_objects.empty()) {
+        if (!infer_objects.empty()) {
             // 裁剪目标 & 排序
-            std::sort(tracked_objects.begin(), tracked_objects.end(),
-                      [](const AlgoObject &item1, const AlgoObject &item2) {
-                          return item1.score > item2.score
-                              && item1.rect.width * item1.rect.height > item2.rect.width * item2.rect.height;
-                      });
+            std::sort(infer_objects.begin(), infer_objects.end(), [](const AlgoObject &item1, const AlgoObject &item2) {
+                return item1.score > item2.score
+                    && item1.rect.width * item1.rect.height > item2.rect.width * item2.rect.height;
+            });
 
             // 裁剪目标数
-            if (tracked_objects.size() > private_->model_configs[2].max_crop_number) {
-                tracked_objects.resize(private_->model_configs[2].max_crop_number);
+            if (infer_objects.size() > private_->model_configs[2].max_crop_number) {
+                infer_objects.resize(private_->model_configs[2].max_crop_number);
             }
 
-            std::vector<AlgoObject> match_objects;
-            for (const auto &tracked_object : tracked_objects) {
-                auto crop_rect = scale_crop_rect(image.cols, image.rows, tracked_object.rect,
-                                                 private_->model_configs[2].crop_scale_factor);
+            for (const auto &item : infer_objects) {
+                auto crop_rect =
+                    scale_crop_rect(image.cols, image.rows, item.rect, private_->model_configs[2].crop_scale_factor);
                 auto crop_image = image(crop_rect).clone();
 
                 gddeploy::BufSurfWrapperPtr crop_surface;
@@ -240,24 +190,24 @@ bool LightMaskAlgo::sync_infer(const int64_t image_id, const cv::Mat &image,
 
                 private_->model_impls[2]->InferSync(in_package, out_package);
 
-                std::vector<AlgoObject> mask_objects;
                 if (!out_package->data.empty() && out_package->data[0]->HasMetaValue()) {
-                    mask_objects = filter_infer_result(out_package->data[0]->GetMetaData<gddeploy::InferResult>(),
+                    auto objects = filter_infer_result(out_package->data[0]->GetMetaData<gddeploy::InferResult>(),
                                                        private_->model_configs[2].labels);
+                    for (auto &obj : objects) {
+                        obj.rect.x += crop_rect.x;
+                        obj.rect.y += crop_rect.y;
+                        match_objects.emplace_back(obj);
+                    }
                 }
-
-                if (mask_objects.empty()) { match_objects.emplace_back(tracked_object); }
             }
-
-            statistic_objects = private_->sequence_statistic->update(match_objects);
         }
     }
 
     return true;
 }
 
-std::vector<AlgoObject> LightMaskAlgo::filter_infer_result(const gddeploy::InferResult &infer_result,
-                                                           const std::set<std::string> &labels) {
+std::vector<AlgoObject> HoistingOperationAlgo::filter_infer_result(const gddeploy::InferResult &infer_result,
+                                                                   const std::set<std::string> &labels) {
     std::vector<AlgoObject> objects;
 
     for (auto result_type : infer_result.result_type) {

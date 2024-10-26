@@ -24,8 +24,8 @@ struct SmokeAlgoConfig {
     float cover_threshold{0.1};                           // 多目标重叠阈值
     std::string map_label{"smoke"};                       // 映射标签 (算法输出标签)
 
-    float statistics_interval{1};   // 每隔N统计一次
-    float statistics_threshold{0.1};// 统计阈值(手与香烟重叠时间占比)
+    float statistics_interval{1};   // 每隔N秒统计一次
+    float statistics_threshold{0.5};// 统计阈值(手与香烟重叠时间占比)
 };
 
 class SmokeAlgo {
@@ -63,7 +63,7 @@ public:
     bool sync_infer(const int64_t image_id, const cv::Mat &image, std::vector<AlgoObject> &objects);
 
 protected:
-    std::vector<AlgoObject> parse_infer_result(const gddeploy::InferResult &infer_result, const float threshold);
+    std::vector<AlgoObject> parse_infer_result(const gddeploy::InferResult &infer_result);
 
 private:
     SmokeAlgoConfig config_;

@@ -5,10 +5,8 @@
 #include "utils.h"
 #include <api/global_config.h>
 #include <bmcv_api_ext.h>
-#include <boost/geometry.hpp>
-#include <boost/geometry/geometries/point_xy.hpp>
-#include <boost/geometry/geometries/polygon.hpp>
 #include <common/type_convert.h>
+#include <core/alg_param.h>
 #include <mutex>
 
 namespace gddi {
@@ -33,10 +31,16 @@ PlayPhoneAlgo::PlayPhoneAlgo(const PlayPhoneAlgoConfig &config) : config_(config
 }
 
 PlayPhoneAlgo::~PlayPhoneAlgo() {
+    std::lock_guard<std::mutex> lock(private_->model_mutex);
     for (auto &impl : private_->model_impls) { impl->WaitTaskDone(); }
 }
 
 bool PlayPhoneAlgo::load_models(const std::vector<ModelConfig> &models) {
+    if (models.size() != 2) {
+        spdlog::error("PlayPhoneAlgo only support two models");
+        return false;
+    }
+
     std::lock_guard<std::mutex> lock(private_->model_mutex);
     private_->model_impls.clear();
 
@@ -59,6 +63,8 @@ void PlayPhoneAlgo::async_infer(const int64_t image_id, const cv::Mat &image, In
 
     auto package = gddeploy::Package::Create(1);
     package->data[0]->Set(surface);
+    package->data[0]->SetAlgParam(
+        gddeploy::AlgDetectParam{private_->model_configs[0].threshold, private_->model_configs[0].nms_threshold});
 
     private_->model_impls[0]->InferAsync(
         package,
@@ -66,8 +72,7 @@ void PlayPhoneAlgo::async_infer(const int64_t image_id, const cv::Mat &image, In
                                                 gddeploy::any user_data) {
             std::vector<AlgoObject> person_objects;
             if (!data->data.empty() && data->data[0]->HasMetaValue()) {
-                person_objects = parse_infer_result(data->data[0]->GetMetaData<gddeploy::InferResult>(),
-                                                    private_->model_configs[0].threshold);
+                person_objects = parse_infer_result(data->data[0]->GetMetaData<gddeploy::InferResult>());
             }
 
             // 生成目标跟踪ID
@@ -105,36 +110,44 @@ void PlayPhoneAlgo::async_infer(const int64_t image_id, const cv::Mat &image, In
                     tracked_objects.resize(private_->model_configs[1].max_crop_number);
                 }
 
-                for (auto &item : tracked_objects) {
-                    auto crop_rect = scale_crop_rect(image.cols, image.rows, item.rect,
-                                                     private_->model_configs[1].crop_scale_factor);
-                    auto crop_image = image(crop_rect).clone();
+                std::vector<AlgoObject> cover_objects;
+                for (const auto &item : tracked_objects) {
+                    auto rect = scale_crop_rect(image.cols, image.rows, item.rect,
+                                                private_->model_configs[1].crop_scale_factor);
+                    auto crop_image = image(rect).clone();
 
                     auto in_package = gddeploy::Package::Create(1);
                     auto out_package = gddeploy::Package::Create(1);
 
                     gddeploy::BufSurfWrapperPtr crop_surface;
-                    convertMat2BufSurface(crop_image, crop_surface);
+                    convertMat2BufSurface(const_cast<cv::Mat &>(crop_image), crop_surface);
                     in_package->data[0]->Set(crop_surface);
+                    in_package->data[0]->SetAlgParam(gddeploy::AlgDetectParam{
+                        private_->model_configs[1].threshold, private_->model_configs[1].nms_threshold});
+
                     private_->model_impls[1]->InferSync(in_package, out_package);
 
-                    std::vector<AlgoObject> smoke_objects;
+                    std::vector<AlgoObject> infer_objects;
                     if (!out_package->data.empty() && out_package->data[0]->HasMetaValue()) {
-                        smoke_objects = parse_infer_result(out_package->data[0]->GetMetaData<gddeploy::InferResult>(),
-                                                           private_->model_configs[1].threshold);
+                        infer_objects = parse_infer_result(out_package->data[0]->GetMetaData<gddeploy::InferResult>());
                     }
 
                     // 赋值跟踪ID
-                    for (auto &obj : smoke_objects) { obj.track_id = item.track_id; }
+                    for (auto &obj : infer_objects) {
+                        obj.rect.x += rect.x;
+                        obj.rect.y += rect.y;
+                        obj.track_id = item.track_id;
+                    }
 
                     // 找到重叠的目标
-                    auto cover_objects =
-                        find_cover_objects(smoke_objects, config_.include_labels, config_.exclude_labels,
-                                           config_.map_label, config_.cover_threshold);
-                    auto statistic_objects = private_->sequence_statistic->update(cover_objects);
-
-                    if (infer_callback) { infer_callback(image_id, image, statistic_objects); }
+                    auto objects = find_cover_objects(infer_objects, config_.include_labels, config_.exclude_labels,
+                                                      config_.map_label, config_.cover_threshold);
+                    cover_objects.insert(cover_objects.end(), objects.begin(), objects.end());
                 }
+
+                auto statistic_objects = private_->sequence_statistic->update(cover_objects);
+
+                if (infer_callback) { infer_callback(image_id, image, statistic_objects); }
             }
         });
 }
@@ -146,14 +159,15 @@ bool PlayPhoneAlgo::sync_infer(const int64_t image_id, const cv::Mat &image,
 
     auto in_package = gddeploy::Package::Create(1);
     in_package->data[0]->Set(surface);
+    in_package->data[0]->SetAlgParam(
+        gddeploy::AlgDetectParam{private_->model_configs[0].threshold, private_->model_configs[0].nms_threshold});
 
     auto out_package = gddeploy::Package::Create(1);
     if (private_->model_impls[0]->InferSync(in_package, out_package) != 0) { return false; }
 
     std::vector<AlgoObject> infer_objects;
     if (!out_package->data.empty() && out_package->data[0]->HasMetaValue()) {
-        infer_objects = parse_infer_result(out_package->data[0]->GetMetaData<gddeploy::InferResult>(),
-                                           private_->model_configs[0].threshold);
+        infer_objects = parse_infer_result(out_package->data[0]->GetMetaData<gddeploy::InferResult>());
     }
 
     // 生成目标跟踪ID
@@ -167,64 +181,66 @@ bool PlayPhoneAlgo::sync_infer(const int64_t image_id, const cv::Mat &image,
         });
     }
 
-    std::vector<AlgoObject> track_objects;
+    std::vector<AlgoObject> tracked_objects;
     for (auto &item : private_->tracker->update(objects)) {
-        track_objects.emplace_back(AlgoObject{
+        tracked_objects.emplace_back(AlgoObject{
             item.target_id, item.class_id, item.label_name, item.score,
             cv::Rect{(int)item.tlwh[0], (int)item.tlwh[1], (int)item.tlwh[2], (int)item.tlwh[3]}, item.track_id});
     }
 
-    // 如果一阶段没有检测目标，直接返回
-    if (!track_objects.empty()) {
+    // 二阶段检测
+    if (!tracked_objects.empty()) {
         // 裁剪目标 & 排序
-        std::sort(track_objects.begin(), track_objects.end(), [](const AlgoObject &item1, const AlgoObject &item2) {
+        std::sort(tracked_objects.begin(), tracked_objects.end(), [](const AlgoObject &item1, const AlgoObject &item2) {
             return item1.score > item2.score
                 && item1.rect.width * item1.rect.height > item2.rect.width * item2.rect.height;
         });
 
         // 裁剪目标数
-        if (track_objects.size() > private_->model_configs[1].max_crop_number) {
-            track_objects.resize(private_->model_configs[1].max_crop_number);
+        if (tracked_objects.size() > private_->model_configs[1].max_crop_number) {
+            tracked_objects.resize(private_->model_configs[1].max_crop_number);
         }
 
-        std::vector<cv::Rect> crop_rects;
-        std::map<int, cv::Mat> crop_images;
-        for (const auto &item : track_objects) {
+        std::vector<AlgoObject> cover_objects;
+        for (const auto &item : tracked_objects) {
             auto rect =
                 scale_crop_rect(image.cols, image.rows, item.rect, private_->model_configs[1].crop_scale_factor);
-            crop_images[item.target_id] = image(rect).clone();
-            crop_rects.emplace_back(rect);
-        }
+            auto crop_image = image(rect).clone();
 
-        for (auto &[target_id, item] : crop_images) {
-            gddeploy::BufSurfWrapperPtr surface;
-            convertMat2BufSurface(const_cast<cv::Mat &>(image), surface);
+            in_package = gddeploy::Package::Create(1);
+            out_package = gddeploy::Package::Create(1);
 
-            auto in_package = gddeploy::Package::Create(1);
-            in_package->data[0]->Set(surface);
+            gddeploy::BufSurfWrapperPtr crop_surface;
+            convertMat2BufSurface(const_cast<cv::Mat &>(crop_image), crop_surface);
+            in_package->data[0]->Set(crop_surface);
+            in_package->data[0]->SetAlgParam(gddeploy::AlgDetectParam{private_->model_configs[1].threshold,
+                                                                      private_->model_configs[1].nms_threshold});
 
-            auto out_package = gddeploy::Package::Create(1);
             private_->model_impls[1]->InferSync(in_package, out_package);
             if (!out_package->data.empty() && out_package->data[0]->HasMetaValue()) {
-                infer_objects = parse_infer_result(out_package->data[0]->GetMetaData<gddeploy::InferResult>(),
-                                                   private_->model_configs[1].threshold);
+                infer_objects = parse_infer_result(out_package->data[0]->GetMetaData<gddeploy::InferResult>());
             }
 
             // 赋值跟踪ID
-            for (auto &obj : infer_objects) { obj.track_id = track_objects.at(target_id).track_id; }
+            for (auto &obj : infer_objects) {
+                obj.rect.x += rect.x;
+                obj.rect.y += rect.y;
+                obj.track_id = item.track_id;
+            }
 
             // 找到重叠的目标
-            auto cover_objects = find_cover_objects(infer_objects, config_.include_labels, config_.exclude_labels,
-                                                    config_.map_label, config_.cover_threshold);
-            statistic_objects = private_->sequence_statistic->update(cover_objects);
+            auto objects = find_cover_objects(infer_objects, config_.include_labels, config_.exclude_labels,
+                                              config_.map_label, config_.cover_threshold);
+            cover_objects.insert(cover_objects.end(), objects.begin(), objects.end());
         }
+
+        statistic_objects = private_->sequence_statistic->update(cover_objects);
     }
 
     return true;
 }
 
-std::vector<AlgoObject> PlayPhoneAlgo::parse_infer_result(const gddeploy::InferResult &infer_result,
-                                                          const float threshold) {
+std::vector<AlgoObject> PlayPhoneAlgo::parse_infer_result(const gddeploy::InferResult &infer_result) {
     std::vector<AlgoObject> objects;
 
     for (auto result_type : infer_result.result_type) {
@@ -232,8 +248,6 @@ std::vector<AlgoObject> PlayPhoneAlgo::parse_infer_result(const gddeploy::InferR
             for (const auto &item : infer_result.detect_result.detect_imgs) {
                 int index = 1;
                 for (auto &obj : item.detect_objs) {
-                    if (obj.score < threshold) { continue; }
-
                     objects.emplace_back(
                         AlgoObject{index++, obj.class_id, obj.label, obj.score,
                                    cv::Rect{(int)obj.bbox.x, (int)obj.bbox.y, (int)obj.bbox.w, (int)obj.bbox.h}});

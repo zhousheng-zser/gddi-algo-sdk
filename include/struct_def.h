@@ -30,6 +30,8 @@ struct ModelConfig {
     // 以下为多阶段裁剪参数
     float crop_scale_factor{1.0f};// 输入目标框缩放系数
     uint32_t max_crop_number{8};  // 最多裁剪目标数 (默认按置信度+目标框面积排序)
+
+    float nms_threshold{0.1f};// NMS阈值
 };
 
 struct AlgoObject {
