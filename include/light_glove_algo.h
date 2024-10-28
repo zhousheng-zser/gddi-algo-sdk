@@ -19,7 +19,7 @@ namespace gddi {
 
 struct LightGloveAlgoConfig {
     float statistics_interval{3};   // 每隔N统计一次
-    float statistics_threshold{0.5};// 统计阈值(检测到灯亮并且未检测到防护镜时间占比)
+    float statistics_threshold{0.5};// 统计阈值(检测到灯亮并且检测到手套时间占比)
 };
 
 class LightGloveAlgo {
