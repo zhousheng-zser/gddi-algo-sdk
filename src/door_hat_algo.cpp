@@ -229,7 +229,7 @@ bool DoorHatAlgo::sync_infer(const int64_t image_id, const cv::Mat &image,
                                             private_->model_configs[2].labels, private_->model_configs[2].threshold);
                 }
 
-                if (mask_objects.empty()) { match_objects.emplace_back(tracked_object); }
+                if (!mask_objects.empty()) { match_objects.emplace_back(tracked_object); }
             }
 
             statistic_objects = private_->sequence_statistic->update(match_objects);
@@ -248,6 +248,8 @@ std::vector<AlgoObject> DoorHatAlgo::filter_infer_result(const gddeploy::InferRe
         if (result_type == gddeploy::GDD_RESULT_TYPE_DETECT) {
             for (const auto &item : infer_result.detect_result.detect_imgs) {
                 int index = 1;
+                std::cout << "label = " << obj.label << "\n";
+                std::cout << "score = " << obj.score << "\n";
                 for (auto &obj : item.detect_objs) {
                     if (labels.count(obj.label) == 0 || obj.score < threshold) { continue; }
 
