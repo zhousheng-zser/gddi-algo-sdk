@@ -248,9 +248,9 @@ std::vector<AlgoObject> DoorHatAlgo::filter_infer_result(const gddeploy::InferRe
         if (result_type == gddeploy::GDD_RESULT_TYPE_DETECT) {
             for (const auto &item : infer_result.detect_result.detect_imgs) {
                 int index = 1;
-                std::cout << "label = " << obj.label << "\n";
-                std::cout << "score = " << obj.score << "\n";
                 for (auto &obj : item.detect_objs) {
+                    std::cout << "label = " << obj.label << "\n";
+                    std::cout << "score = " << obj.score << "\n";
                     if (labels.count(obj.label) == 0 || obj.score < threshold) { continue; }
 
                     objects.emplace_back(
