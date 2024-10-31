@@ -9,9 +9,8 @@ int main() {
 
     std::string video_path = "../videos/door_hat.mp4";
     std::vector<gddi::ModelConfig> models = {
-        {"door", "/opt/glasssix/edgebox/cpp/ai-sdk/model/gx_pump_hoisting_light_detection_api_model.gdd", "/opt/glasssix/edgebox/cpp/ai-sdk/license/gx_pump_hoisting_light_detection_api_license", 0.3, {"close"}},
-        {"person", "/opt/glasssix/edgebox/cpp/ai-sdk/model/gx_pump_person_api_model.gdd", "/opt/glasssix/edgebox/cpp/ai-sdk/license/gx_pump_person_api_license", 0.1, {"person"}},
-        {"hat", "/opt/glasssix/edgebox/cpp/ai-sdk/model/gx_pump_protective_hat_api_model.gdd", "/opt/glasssix/edgebox/cpp/ai-sdk/license/gx_pump_protective_hat_api_license", 0.1, {"un_hat"}}};
+        {"door", "/opt/glasssix/edgebox/cpp/ai-sdk/model/gx_pump_paint_room_door_api_model.gdd", "/opt/glasssix/edgebox/cpp/ai-sdk/license/gx_pump_paint_room_door_api_license", 0.3, {"close"}},
+        {"hat", "/opt/glasssix/edgebox/cpp/ai-sdk/model/gx_pump_protective_hat_api_model.gdd", "/opt/glasssix/edgebox/cpp/ai-sdk/license/gx_pump_protective_hat_api_license", 0.3, {"un_hat"}}};
 
     if (!door_hat_algo->load_models(models)) {
         printf("Failed to load models\n");

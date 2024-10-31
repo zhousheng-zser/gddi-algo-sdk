@@ -19,7 +19,7 @@ namespace gddi {
 
 struct DoorHatAlgoConfig {
     float statistics_interval{3};   // 每隔N统计一次
-    float statistics_threshold{0.5};// 统计阈值(检测到关门并且未检测到防护帽时间占比)
+    float statistics_threshold{0.5};// 统计阈值(检测到关们并且检测到防护帽时间占比)
 };
 
 class DoorHatAlgo {
@@ -30,20 +30,11 @@ public:
     /**
      * @brief 加载模型
      * 
-     * @param models 行人+抽烟模型
+     * @param models 大门+防护帽模型
      * @return true 
      * @return false 
      */
     bool load_models(const std::vector<ModelConfig> &models);
-
-    /**
-     * @brief 异步推理接口
-     * 
-     * @param image_id 帧ID
-     * @param image    图像
-     * @param callback 回调
-     */
-    void async_infer(const int64_t image_id, const cv::Mat &image, InferCallback callback);
 
     /**
      * @brief 同步推理接口
@@ -57,8 +48,7 @@ public:
     bool sync_infer(const int64_t image_id, const cv::Mat &image, std::vector<AlgoObject> &objects);
 
 protected:
-    std::vector<AlgoObject> filter_infer_result(const gddeploy::InferResult &infer_result,
-                                                const std::set<std::string> &labels, const float threshold);
+    std::vector<AlgoObject> parse_infer_result(const gddeploy::InferResult &infer_result, const float threshold);
 
 private:
     DoorHatAlgoConfig config_;
