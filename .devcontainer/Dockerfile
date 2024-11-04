@@ -5,7 +5,7 @@ RUN sed -i 's/archive.ubuntu.com/mirrors.ustc.edu.cn/g' /etc/apt/sources.list
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt update && \
-    apt install -y git python3 python3-pip pkgconf ninja-build ccache libssl-dev autopoint wget && \
+    apt install -y git python3 python3-pip pkgconf ninja-build ccache libssl-dev autopoint wget unzip && \
     rm -rf /var/lib/apt/lists/*
 
 # CMake
@@ -61,4 +61,4 @@ WORKDIR /workspace
 
 RUN ["/bin/zsh"]
 
-# docker build -f .devcontainer/Dockerfile -t registry.desauto.cn/inference/sdk-devel:1.0.0 .
+# docker build -f .devcontainer/Dockerfile -t sdk-devel:1.0.0 .
