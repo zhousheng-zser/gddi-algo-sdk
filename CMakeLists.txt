@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14.0)
-project(gddi-algo-sdk VERSION 1.0.4 LANGUAGES CXX C)
+project(gddi-algo-sdk VERSION 1.0.10 LANGUAGES CXX C)
 
 include(FetchContent)
 include(ExternalProject)
